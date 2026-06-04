@@ -1,0 +1,12 @@
+# Rails runtime
+backend/log/*.log
+backend/tmp/
+backend/storage/*.sqlite3
+backend/storage/*.sqlite3-journal
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store

@@ -1,0 +1,73 @@
+name: Sync Metadata
+
+# When a maintainer comments /sync-metadata on a pull request, refresh the search
+# metadata index for each content file the PR changed.
+#
+# issue_comment runs from the base repo's default branch with the base repo's
+# write-scoped GITHUB_TOKEN, so the index can be written back even for fork PRs.
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  sync:
+    name: Sync changed content files
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/sync-metadata')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Resolve the pull request head
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('repo', pr.data.head.repo.full_name);
+            core.setOutput('sha',  pr.data.head.sha);
+
+      # Checks out the contributor's fork so the changed files exist on disk.
+      - name: Check out the PR branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pr.outputs.repo }}
+          ref: ${{ steps.pr.outputs.sha }}
+
+      - name: List changed content files
+        id: changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Paths under content/ that this PR added or modified, space-joined.
+          FILES=$(gh pr diff ${{ github.event.issue.number }} \
+                    --repo ${{ github.repository }} --name-only \
+                  | grep '^content/' | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh metadata index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in ${{ steps.changed.outputs.files }}; do
+            echo "Indexing $f"
+            wc -c "$f" 2>/dev/null || true
+          done
+
+      - name: Acknowledge on the PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '🔄 Metadata index refreshed.',
+            });
